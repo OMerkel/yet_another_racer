@@ -59,3 +59,5 @@ The screenshot shows a sample active input state.
 - `src/racer/input.py` defines input contracts and adapts keyboard and gamepad input.
 - `src/racer/game_state.py` contains immutable state and pure race transitions.
 - `src/racer/rendering.py` draws frames from state without changing it.
+- [Software Architecture](doc/software_architecture.md) describes the application modules and runtime flow.
+- [Software Requirements Specification](doc/requirements.md) records functional requirements and verification cases.
