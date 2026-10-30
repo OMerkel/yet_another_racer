@@ -1,0 +1,31 @@
+[project]
+name = "yet-another-racer"
+version = "0.1.0"
+description = "A small retro arcade racing game built with Pygame."
+requires-python = ">=3.10"
+dependencies = [
+    "pygame-ce>=2.5.3,<3",
+]
+
+[tool.uv]
+package = false
+
+[tool.black]
+line-length = 80
+
+[tool.ruff]
+line-length = 80
+
+[tool.pylint.format]
+max-line-length = 80
+
+[tool.pylint.typecheck]
+generated-members = ["pygame.*"]
+
+[tool.pylint.design]
+max-args = 6
+max-positional-arguments = 6
+max-attributes = 16
+max-branches = 13
+max-locals = 18
+min-public-methods = 0
