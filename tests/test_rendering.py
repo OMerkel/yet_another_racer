@@ -40,8 +40,11 @@ from src.racer.rendering import (
     _track_map_position,
     _track_map_subtitle,
     _world_track_point,
+    create_fonts,
     draw_car_selection,
+    draw_frame,
 )
+from src.racer.rendering_geometry import ROAD_DRAW_DISTANCE
 from src.racer.track import (
     HOCKENHEIM,
     NURBURGRING_GP,
@@ -64,11 +67,10 @@ class RenderingTests(unittest.TestCase):
         THEN the pixel has the mountain color
         """
         surface = pygame.Surface(SCREEN_SIZE)
-        far_offset, _ = _background_parallax_offsets(0.0)
         _draw_background(surface)
 
         self.assertEqual(
-            surface.get_at((790 + far_offset, 140))[:3], (79, 98, 125)
+            surface.get_at((790, 140))[:3], (79, 98, 125)
         )
 
     def test_traffic_uses_selected_car_shape(self):
@@ -92,20 +94,134 @@ class RenderingTests(unittest.TestCase):
             )
         )
 
+    def test_player_and_traffic_render_with_selected_car_width(self):
+        """Both sprites use the same physical width as collision detection."""
+        pygame.font.init()
+        surface = pygame.Surface(SCREEN_SIZE)
+        state = new_game()
+        car_type = replace(CAR_TYPES[0], width=2.4)
+        camera = _race_camera(state.distance, state.track, state.lateral)
+        expected_widths = []
+        for car in state.traffic:
+            gap = car.distance - state.distance
+            coordinates = _camera_coordinates(
+                camera,
+                _world_track_point(
+                    car.distance, car.lane * ROAD_HALF_WIDTH, state.track
+                ),
+            )
+            if 0 <= gap <= ROAD_DRAW_DISTANCE and coordinates[2] >= NEAR_PLANE:
+                expected_widths.append(
+                    car_type.width * FOCAL_LENGTH / coordinates[2]
+                )
+        player_coordinates = _camera_coordinates(
+            camera,
+            _world_track_point(
+                state.distance, state.lateral * ROAD_HALF_WIDTH, state.track
+            ),
+        )
+        expected_widths.append(
+            car_type.width * FOCAL_LENGTH / player_coordinates[2]
+        )
+        with patch("src.racer.rendering._draw_car") as draw_car:
+            draw_frame(surface, state, create_fonts(), car_type)
+
+        self.assertGreater(len(expected_widths), 1)
+        self.assertCountEqual(
+            [call.args[3] for call in draw_car.call_args_list], expected_widths
+        )
+
     def test_background_parallax_opposes_road_bend_by_depth(self):
         """TST-013; FR-008.
 
         FEATURE: Game presentation
         SCENARIO: Offset near and distant scenery against the road bend
-        GIVEN a positive road bend
+        GIVEN a camera turning in either direction
         WHEN background parallax offsets are calculated
-        THEN both layers move opposite the bend
+        THEN all three layers move opposite the turn
+        AND the sun moves less than the far mountains
         AND the near layer moves more than the far layer
         """
-        far_offset, near_offset = _background_parallax_offsets(0.0, HOCKENHEIM)
+        start = sample_track(0.0, HOCKENHEIM)
+        for turn in (-0.5, 0.5):
+            with patch(
+                "src.racer.rendering.sample_track",
+                return_value=replace(start, heading=start.heading + turn),
+            ):
+                sun, far, near = _background_parallax_offsets(0.0, HOCKENHEIM)
 
-        self.assertLess(far_offset, 0)
-        self.assertLess(near_offset, far_offset)
+            self.assertLess(sun * turn, 0)
+            self.assertLess(abs(sun), abs(far))
+            self.assertLess(abs(far), abs(near))
+
+    def test_background_scrolls_as_the_camera_turns(self):
+        """Scenery scrolls through turns and repeats after a complete lap."""
+        for track in TRACKS:
+            start = _background_parallax_offsets(0.0, track)
+            offsets = [
+                _background_parallax_offsets(segment.distance, track)
+                for segment in track.segments
+            ]
+            for layer in range(3):
+                self.assertGreater(
+                    max(offset[layer] for offset in offsets)
+                    - min(offset[layer] for offset in offsets),
+                    SCREEN_SIZE[0] // 2,
+                )
+            self.assertEqual(
+                start, _background_parallax_offsets(track.length, track)
+            )
+
+    def test_background_tiles_cover_edges_and_wrap_without_gaps(self):
+        """Repeating background tiles cover screen edges without gaps."""
+        width, height = SCREEN_SIZE
+        for offsets in ((0, 0, 0), (165, -437, 529), (-790, 170, -230)):
+            surface = pygame.Surface(SCREEN_SIZE)
+            repeated = pygame.Surface(SCREEN_SIZE)
+            with patch(
+                "src.racer.rendering._background_parallax_offsets",
+                return_value=offsets,
+            ):
+                _draw_background(surface)
+            with patch(
+                "src.racer.rendering._background_parallax_offsets",
+                return_value=tuple(offset + width for offset in offsets),
+            ):
+                _draw_background(repeated)
+
+            self.assertEqual(
+                pygame.image.tobytes(surface, "RGB"),
+                pygame.image.tobytes(repeated, "RGB"),
+            )
+            for horizontal in range(width):
+                self.assertEqual(
+                    surface.get_at((horizontal, 200))[:3], (54, 83, 92)
+                )
+            self.assertEqual(
+                surface.get_at((0, height - 1))[:3], (44, 126, 71)
+            )
+        self.assertEqual(surface.get_at((0, 100))[:3], (255, 206, 119))
+
+    def test_background_is_continuous_at_heading_and_lap_boundaries(self):
+        """Parallax stays continuous across wrapped headings and lap ends."""
+        for track in TRACKS:
+            distances = [-0.01, track.length - 0.01]
+            distances.extend(
+                following.distance - 0.01
+                for segment, following in zip(
+                    track.segments, track.segments[1:]
+                )
+                if abs(following.heading - segment.heading) > math.pi
+            )
+            for distance in distances:
+                before = _background_parallax_offsets(distance, track)
+                after = _background_parallax_offsets(distance + 0.02, track)
+                for first, second in zip(before, after):
+                    wrapped_delta = (
+                        (second - first + SCREEN_SIZE[0] / 2) % SCREEN_SIZE[0]
+                        - SCREEN_SIZE[0] / 2
+                    )
+                    self.assertLessEqual(abs(wrapped_delta), 1)
 
     def test_track_map_draws_the_circuit_and_current_position(self):
         """TST-020; FR-011.

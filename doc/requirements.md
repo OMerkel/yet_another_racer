@@ -146,7 +146,7 @@ full throttle can recover a car from rest. Curbs do not apply the grass penalty.
 
 ### FR-006 — Traffic, collisions, and score
 
-**Verification:** AT-002.
+**Verification:** TST-044, TST-045, and AT-002.
 
 ```gherkin
 FEATURE: Traffic and scoring
@@ -154,6 +154,10 @@ SCENARIO: Encounter traffic, leave the road, and pass opponent cars
 GIVEN an active race with deterministic traffic
 WHEN the player overlaps a traffic car on the track
 THEN the player's speed is reduced and a crash timer is started
+AND overlap uses the selected car type's width and length in meters
+AND separated cars and footprints that only touch do not trigger contact
+AND the crash timer prevents repeated speed penalties for 0.9 seconds
+AND the contact indicator reports a recent hit, not necessarily current overlap
 WHEN the player passes traffic
 THEN the score increases by 250 points per car
 AND traffic behind the player is removed
@@ -179,7 +183,7 @@ AND subsequent simulation steps leave the completed state unchanged
 ### FR-008 — Race and selection rendering
 
 **Verification:** TST-011 through TST-013, TST-021, TST-027, TST-031,
-TST-032, TST-041–TST-043, and AT-001.
+TST-032, TST-041–TST-043, TST-046 through TST-049, and AT-001.
 
 ```gherkin
 FEATURE: Game presentation
@@ -193,9 +197,11 @@ AND fixed world-space road edges are projected using camera-space depth
 AND road width, markings, player, traffic, and map use the same meter scale
 AND geometry behind the camera is clipped before perspective projection
 AND traffic uses the selected car shape
+AND player and traffic sprite widths use the selected car type's width
 AND mountains cover the sun where their shapes overlap
-AND background parallax moves opposite the road bend, with near scenery
-  moving more than distant scenery
+AND background parallax scrolls opposite camera turns, with the sun moving
+  slower than the far mountain range and the near mountain range fastest
+AND background layers repeat seamlessly at screen edges and lap boundaries
 AND a completed race displays a game-over overlay
 ```
 
@@ -432,6 +438,12 @@ Gherkin feature/scenario.
 | TST-041 | `RenderingTests.test_start_line_draws_alternating_grid_tiles` | FR-008, FR-014 |
 | TST-042 | `RenderingTests.test_start_lights_extinguish_during_grid_countdown` | FR-008, FR-014 |
 | TST-043 | `RenderingTests.test_grid_hud_starts_on_lap_one_before_start_line` | FR-008, FR-014 |
+| TST-044 | `GameStateTests.test_collision_uses_selected_car_dimensions_in_meters` | FR-006 |
+| TST-045 | `GameStateTests.test_collision_cooldown_prevents_repeated_speed_penalties` | FR-006 |
+| TST-046 | `RenderingTests.test_player_and_traffic_render_with_selected_car_width` | FR-008 |
+| TST-047 | `RenderingTests.test_background_scrolls_as_the_camera_turns` | FR-008 |
+| TST-048 | `RenderingTests.test_background_tiles_cover_edges_and_wrap_without_gaps` | FR-008 |
+| TST-049 | `RenderingTests.test_background_is_continuous_at_heading_and_lap_boundaries` | FR-008 |
 
 ### 6.2 Manual acceptance checks
 

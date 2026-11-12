@@ -12,11 +12,18 @@ from src.racer.game_state import (
     MAX_SPEED,
     START_LIGHTS_DURATION,
     START_SPEED,
+    TrafficCar,
     new_game,
     step_game,
 )
 from src.racer.input import DriveInput
-from src.racer.track import HOCKENHEIM, TRACKS, Track, sample_track
+from src.racer.track import (
+    HOCKENHEIM,
+    ROAD_HALF_WIDTH,
+    TRACKS,
+    Track,
+    sample_track,
+)
 
 
 class GameStateTests(unittest.TestCase):
@@ -63,6 +70,56 @@ class GameStateTests(unittest.TestCase):
             speed=speed,
             lateral=lateral,
         )
+
+    def test_collision_uses_selected_car_dimensions_in_meters(self):
+        """Only overlapping footprints incur a collision penalty."""
+        car_types = (*CAR_TYPES, replace(CAR_TYPES[0], width=0.9, length=2.0))
+        for car_type in car_types:
+            for direction in (-1, 1):
+                for gap, separation, collision in (
+                    (0.0, 0.0, True),
+                    (car_type.length - 0.01, car_type.width - 0.01, True),
+                    (car_type.length, 0.0, False),
+                    (car_type.length + 0.01, 0.0, False),
+                    (0.0, car_type.width, False),
+                    (0.0, car_type.width + 0.01, False),
+                    (0.0, 1.95, False),
+                    (8.9, 0.0, False),
+                ):
+                    with self.subTest(
+                        car_type=car_type,
+                        direction=direction,
+                        gap=gap,
+                        separation=separation,
+                    ):
+                        state = replace(
+                            self.active_state(distance=100.0, speed=120.0),
+                            traffic=(
+                                TrafficCar(
+                                    distance=100.0 + direction * gap,
+                                    lane=(
+                                        direction * separation / ROAD_HALF_WIDTH
+                                    ),
+                                    color=(80, 188, 207),
+                                ),
+                            ),
+                        )
+                        updated = step_game(state, DriveInput(), 0.0, car_type)
+                        self.assertEqual(updated.crash_time > 0, collision)
+                        self.assertAlmostEqual(
+                            updated.speed, 120.0 * (0.48 if collision else 1.0)
+                        )
+
+    def test_collision_cooldown_prevents_repeated_speed_penalties(self):
+        """An ongoing collision does not reapply the penalty during cooldown."""
+        state = replace(
+            self.active_state(distance=100.0, speed=120.0),
+            traffic=(TrafficCar(100.0, 0.0, (80, 188, 207)),),
+            crash_time=0.5,
+        )
+        updated = step_game(state, DriveInput(), 0.0)
+        self.assertEqual(updated.speed, state.speed)
+        self.assertEqual(updated.crash_time, state.crash_time)
 
     def test_step_returns_new_state_and_preserves_previous_state(self):
         """TST-005; NFR-002.

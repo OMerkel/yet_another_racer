@@ -112,15 +112,11 @@ def create_fonts() -> Fonts:
 
 def _background_parallax_offsets(
     distance: float, track: Track = DEFAULT_TRACK
-) -> tuple[int, int]:
-    road_bend = max(
-        -180.0,
-        min(
-            180.0,
-            road_center(distance, 0.0, track) - SCREEN_WIDTH / 2,
-        ),
-    )
-    return round(-road_bend * 0.14), round(-road_bend * 0.30)
+) -> tuple[int, int, int]:
+    heading = sample_track(distance, track).heading
+    start_heading = track.segments[0].heading
+    scroll = -(heading - start_heading) * SCREEN_WIDTH / math.tau
+    return round(scroll), round(scroll * 2), round(scroll * 3)
 
 
 def _draw_parallax_polygon(
@@ -129,8 +125,10 @@ def _draw_parallax_polygon(
     points: Sequence[tuple[int, int]],
     offset: int,
 ) -> None:
-    shifted_points = [(x + offset if y < HORIZON else x, y) for x, y in points]
-    _polygon(surface, color, shifted_points)
+    wrapped_offset = offset % SCREEN_WIDTH
+    for tile_offset in (wrapped_offset - SCREEN_WIDTH, wrapped_offset):
+        shifted_points = [(x + tile_offset, y) for x, y in points]
+        _polygon(surface, color, shifted_points)
 
 
 def _draw_background(
@@ -138,7 +136,9 @@ def _draw_background(
     distance: float = 0.0,
     track: Track = DEFAULT_TRACK,
 ) -> None:
-    far_offset, near_offset = _background_parallax_offsets(distance, track)
+    sun_offset, far_offset, near_offset = _background_parallax_offsets(
+        distance, track
+    )
     for y in range(0, HORIZON + 1, 3):
         amount = y / HORIZON
         color = tuple(
@@ -147,7 +147,11 @@ def _draw_background(
         )
         pygame.draw.rect(surface, color, (0, y, SCREEN_WIDTH, 3))
 
-    pygame.draw.circle(surface, (255, 206, 119), (790 + far_offset, 118), 35)
+    sun_x = (790 + sun_offset) % SCREEN_WIDTH
+    for tile_offset in (-SCREEN_WIDTH, 0, SCREEN_WIDTH):
+        pygame.draw.circle(
+            surface, (255, 206, 119), (sun_x + tile_offset, 118), 35
+        )
     _draw_parallax_polygon(
         surface,
         (79, 98, 125),
@@ -162,7 +166,7 @@ def _draw_background(
             (724, 94),
             (849, 174),
             (925, 119),
-            (960, 146),
+            (960, 181),
             (960, 215),
             (0, 215),
         ],
@@ -180,7 +184,7 @@ def _draw_background(
             (605, 139),
             (738, 195),
             (857, 130),
-            (960, 179),
+            (960, 194),
             (960, 218),
             (0, 218),
         ],
@@ -216,7 +220,7 @@ def _draw_traffic(
             surface,
             x,
             y,
-            1.8 * FOCAL_LENGTH / depth,
+            car_type.width * FOCAL_LENGTH / depth,
             car.color,
             car_type=car_type,
         )
@@ -573,7 +577,7 @@ def draw_frame(
         surface,
         player_x,
         player_y,
-        1.8 * FOCAL_LENGTH / player_coordinates[2],
+        car_type.width * FOCAL_LENGTH / player_coordinates[2],
         player_color,
         player=True,
         car_type=car_type,

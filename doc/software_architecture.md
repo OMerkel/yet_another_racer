@@ -59,7 +59,7 @@ flowchart LR
 
 ## Domain Types and Contracts
 
-- `CarType` holds a rendering `shape`, menu `name`, and relative `acceleration` and `braking` multipliers. `CAR_TYPES` contains the Formula model (`1.0`, `1.0`) and Classic model (`0.7`, `0.8`). These values are used directly by `step_game()` and the render path.
+- `CarType` holds a rendering `shape`, menu `name`, physical `width` and `length` in meters, and relative `acceleration` and `braking` multipliers. `CAR_TYPES` contains the Formula model (`1.0`, `1.0`) and Classic model (`0.7`, `0.8`). Dimensions determine collision bounds, width determines projected sprite size, and performance multipliers are used by `step_game()`.
 - `DriveInput` is a frozen value object with `accelerate`, `brake`, and `steering` floats. The gameplay adapter produces throttle and brake in `[0, 1]`; steering is a normalized left/right value. `combine_controls()` takes the largest throttle and brake from active sources and sums steering before clamping it to `[-1, 1]`.
 - Gamepad axis constants in `gamepad.py` define left-stick axes `(0, 1)`, right-stick axes `(2, 3)`, left-trigger axis `4`, and right-trigger axis `5`. Gameplay uses left-stick horizontal axis 0 and D-pad horizontal input for steering, axis 4 for braking, and axis 5 for acceleration. Trigger values are mapped linearly from `[-1, 1]` to `[0, 1]`; an absent trigger axis defaults to `-1`, or zero input. Stick steering values within `JOYSTICK_DEADZONE` (`0.18`) of zero are set to zero.
 - Keyboard arrows and WASD produce digital values (`0.0` or `1.0`) for throttle/brake and `-1.0`, `0.0`, or `1.0` for steering. Keyboard and gamepad values are combined by `InputHandler.read_controls()`.
@@ -116,6 +116,15 @@ During a race, each frame processes queued events before polling held controls. 
 
 ## Simulation and Rendering Details
 
+`CarType` owns physical width and length in meters: Formula is 1.8 by 5.5
+meters, and Classic is 1.8 by 4.2 meters. Player and traffic rendering use
+the selected type's width. Collision detection uses track-aligned rectangular
+footprints, with traffic using the same type as the player. Contact requires
+absolute distance separation below the car length and lateral separation
+(`abs(lane - lateral) * ROAD_HALF_WIDTH`) below its width. Merely touching
+footprint boundaries does not trigger a collision. The existing 0.9-second
+crash timer remains a penalty cooldown and a recent-contact indicator.
+
 `step_game()` is a pure transition: it returns a `dataclasses.replace()` copy and does not mutate the supplied `GameState`. It returns the original state unchanged once `game_over` is true. For active races, throttle and brake are clamped to `[0, 1]`; speed is updated using the selected car's factors and then clamped to `[0, MAX_SPEED]`:
 
 ```text
@@ -130,6 +139,15 @@ Traffic is initialized deterministically with ten cars at fixed track-distance i
 `track.py` builds separate sampled centerlines for Hockenheim (4,574 meters) and Nürburgring GP (5,148 meters) from closed Catmull-Rom waypoint spans. Each segment stores its start distance, length, world position, heading, curvature, elevation, grade, and named sector. The geometries follow the broad shapes and turn sequences of the supplied bird's-eye maps, but remain approximations rather than surveyed coordinates. `sample_track()` wraps race distance and interpolates centerline data across segment and lap boundaries for a selected `Track`.
 
 Road strips are fixed in world coordinates at 3-meter distance intervals with a 13-meter width. Their edges use the same centerline position and tangent as physics and the overview map. Centerline position is interpolated smoothly and heading is derived from its tangent, including across lap boundaries. A chase camera sits 8 meters behind the player and 4.5 meters above the road; world vertices are transformed into camera coordinates, clipped at a 1-meter near plane, and projected by dividing by forward depth. Visible road strips out to 450 meters are sorted back-to-front. Per-frame projected cross-sections are reused for asphalt, curbs, edge lines, and center dashes. Traffic and the player use the same camera and meter scale. The checkered start-line tiles are world-space road polygons at distance zero, so they share the road perspective and repeat at the lap boundary. The five red start lamps extinguish in sequence during the countdown. The map marker includes the player's lateral offset. The pre-race options screen shows a larger bird's-eye preview of the selected track. Background parallax remains decorative and does not influence road geometry or driving.
+
+Background parallax uses the sampled camera heading relative to the track's
+starting heading. The sun and far and near mountain ranges repeat one, two,
+and three times per full camera revolution, respectively, scrolling opposite
+the turn. Mountain silhouettes tile horizontally with matching endpoints;
+the sun wraps with copies at the screen edges. Integer repeat counts keep
+the images continuous when headings wrap at +/-pi and laps cross the start
+line. Offsets are derived from race distance rather than accumulated per
+frame, so stationary scenery does not drift and rendering remains stateless.
 
 ## State and Input Lifecycle
 

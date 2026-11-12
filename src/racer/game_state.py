@@ -34,17 +34,33 @@ TRAFFIC_COLORS = (
 
 @dataclass(frozen=True)
 class CarType:
-    """Visual model and relative acceleration and braking for a car."""
+    """Visual model, dimensions in meters, and relative driving performance."""
 
     shape: str
     name: str
     acceleration: float
     braking: float
+    width: float
+    length: float
 
 
 CAR_TYPES = (
-    CarType(shape="f1", name="FORMULA", acceleration=1.0, braking=1.0),
-    CarType(shape="simple", name="CLASSIC", acceleration=0.7, braking=0.8),
+    CarType(
+        shape="f1",
+        name="FORMULA",
+        acceleration=1.0,
+        braking=1.0,
+        width=1.8,
+        length=5.5,
+    ),
+    CarType(
+        shape="simple",
+        name="CLASSIC",
+        acceleration=0.7,
+        braking=0.8,
+        width=1.8,
+        length=4.2,
+    ),
 )
 
 
@@ -106,10 +122,14 @@ def new_game(
 
 
 def _has_collision(
-    traffic: tuple[TrafficCar, ...], distance: float, lateral: float
+    traffic: tuple[TrafficCar, ...],
+    distance: float,
+    lateral: float,
+    car_type: CarType = CAR_TYPES[0],
 ) -> bool:
     return any(
-        -3 < car.distance - distance < 9 and abs(car.lane - lateral) < 0.32
+        abs(car.distance - distance) < car_type.length
+        and abs(car.lane - lateral) * ROAD_HALF_WIDTH < car_type.width
         for car in traffic
     )
 
@@ -196,7 +216,9 @@ def step_game(
 
     if offroad:
         speed = max(0.0, speed - speed * OFFROAD_SPEED_DRAG * delta_time)
-    if crash_time <= 0 and _has_collision(state.traffic, distance, lateral):
+    if crash_time <= 0 and _has_collision(
+        state.traffic, distance, lateral, car_type
+    ):
         speed *= 0.48
         crash_time = 0.9
 

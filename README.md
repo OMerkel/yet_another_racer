@@ -70,7 +70,13 @@ Before a race, D-pad and left-stick directions follow the same navigation:
 vertical selects an option and horizontal changes its value. The default race
 is three laps.
 
-Collisions and driving off the road reduce speed. Passing traffic earns points.
+Collisions and driving off the road reduce speed. Collision bounds use the
+selected car's physical width and length. `CONTACT!` indicates a recent hit
+and remains visible for 0.9 seconds, even after the cars separate. Passing
+traffic earns points.
+
+The sun and two mountain ranges scroll as the camera turns, with distant
+scenery moving more slowly than nearby scenery.
 
 ## Gamepad Visualizer
 
