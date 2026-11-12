@@ -33,6 +33,7 @@ from src.racer.rendering import (
     _draw_road,
     _draw_start_lights,
     _draw_start_line,
+    _draw_sun,
     _draw_track_map,
     _draw_traffic,
     _project_camera_point,
@@ -67,10 +68,12 @@ class RenderingTests(unittest.TestCase):
         THEN the pixel has the mountain color
         """
         surface = pygame.Surface(SCREEN_SIZE)
-        _draw_background(surface)
+        camera = replace(_race_camera(0.0, HOCKENHEIM), heading=math.pi)
+        with patch("src.racer.rendering._race_camera", return_value=camera):
+            _draw_background(surface)
 
         self.assertEqual(
-            surface.get_at((790, 140))[:3], (79, 98, 125)
+            surface.get_at((SCREEN_SIZE[0] // 2, 150))[:3], (79, 98, 125)
         )
 
     def test_traffic_uses_selected_car_shape(self):
@@ -138,8 +141,7 @@ class RenderingTests(unittest.TestCase):
         SCENARIO: Offset near and distant scenery against the road bend
         GIVEN a camera turning in either direction
         WHEN background parallax offsets are calculated
-        THEN all three layers move opposite the turn
-        AND the sun moves less than the far mountains
+        THEN both mountain layers move opposite the turn
         AND the near layer moves more than the far layer
         """
         start = sample_track(0.0, HOCKENHEIM)
@@ -148,10 +150,9 @@ class RenderingTests(unittest.TestCase):
                 "src.racer.rendering.sample_track",
                 return_value=replace(start, heading=start.heading + turn),
             ):
-                sun, far, near = _background_parallax_offsets(0.0, HOCKENHEIM)
+                far, near = _background_parallax_offsets(0.0, HOCKENHEIM)
 
-            self.assertLess(sun * turn, 0)
-            self.assertLess(abs(sun), abs(far))
+            self.assertLess(far * turn, 0)
             self.assertLess(abs(far), abs(near))
 
     def test_background_scrolls_as_the_camera_turns(self):
@@ -162,7 +163,7 @@ class RenderingTests(unittest.TestCase):
                 _background_parallax_offsets(segment.distance, track)
                 for segment in track.segments
             ]
-            for layer in range(3):
+            for layer in range(2):
                 self.assertGreater(
                     max(offset[layer] for offset in offsets)
                     - min(offset[layer] for offset in offsets),
@@ -175,7 +176,7 @@ class RenderingTests(unittest.TestCase):
     def test_background_tiles_cover_edges_and_wrap_without_gaps(self):
         """Repeating background tiles cover screen edges without gaps."""
         width, height = SCREEN_SIZE
-        for offsets in ((0, 0, 0), (165, -437, 529), (-790, 170, -230)):
+        for offsets in ((0, 0), (-437, 529), (170, -230)):
             surface = pygame.Surface(SCREEN_SIZE)
             repeated = pygame.Surface(SCREEN_SIZE)
             with patch(
@@ -200,19 +201,113 @@ class RenderingTests(unittest.TestCase):
             self.assertEqual(
                 surface.get_at((0, height - 1))[:3], (44, 126, 71)
             )
-        self.assertEqual(surface.get_at((0, 100))[:3], (255, 206, 119))
+
+    def test_sun_is_projected_due_south_independently_of_parallax(self):
+        """TST-050; FR-008.
+
+        FEATURE: Fixed southern sun
+        SCENARIO: Project the sun using the camera's world direction
+        GIVEN a distant sun due south and a camera facing cardinal directions
+        WHEN the background is drawn
+        THEN the sun is centered facing south and hidden facing north
+        AND the sun is hidden when facing east or west
+        AND mountain offsets do not affect its position
+        """
+        width = SCREEN_SIZE[0]
+        sun_color = (255, 206, 119)
+        for heading, visible in (
+            (math.pi, True),
+            (-math.pi, True),
+            (math.pi - 0.2, True),
+            (math.pi + 0.2, True),
+            (0.0, False),
+            (math.pi / 2, False),
+            (-math.pi / 2, False),
+        ):
+            with self.subTest(heading=heading):
+                surface = pygame.Surface(SCREEN_SIZE)
+                camera = replace(_race_camera(0.0, HOCKENHEIM), heading=heading)
+                with (
+                    patch(
+                        "src.racer.rendering._race_camera", return_value=camera
+                    ),
+                    patch(
+                        "pygame.draw.circle", wraps=pygame.draw.circle
+                    ) as draw_circle,
+                ):
+                    _draw_sun(surface, 0.0, HOCKENHEIM)
+
+                if not visible:
+                    draw_circle.assert_not_called()
+                    continue
+                draw_circle.assert_called_once()
+                center = draw_circle.call_args.args[2]
+                depth = -math.cos(heading)
+                self.assertEqual(
+                    center[0],
+                    round(width / 2 + FOCAL_LENGTH * math.sin(heading) / depth),
+                )
+                self.assertLess(center[1], 205)
+                self.assertEqual(surface.get_at(center)[:3], sun_color)
+                with (
+                    patch(
+                        "src.racer.rendering._race_camera", return_value=camera
+                    ),
+                    patch(
+                        "src.racer.rendering._background_parallax_offsets",
+                        return_value=(400, -300),
+                    ),
+                    patch("pygame.draw.circle") as background_circle,
+                ):
+                    _draw_background(surface)
+                self.assertEqual(background_circle.call_args.args[2], center)
+
+    def test_southern_sun_reappears_at_the_same_position_on_later_laps(self):
+        """TST-054; FR-008.
+
+        FEATURE: Fixed southern sun
+        SCENARIO: See the same sun after completing a clockwise lap
+        GIVEN either circuit at a south-facing position
+        WHEN that position is revisited on subsequent laps
+        THEN the sun has the same projected center and radius
+        """
+        surface = pygame.Surface(SCREEN_SIZE)
+        for track in TRACKS:
+            segment = min(
+                track.segments,
+                key=lambda segment: abs(
+                    math.remainder(segment.heading - math.pi, math.tau)
+                ),
+            )
+            appearances = []
+            for lap in range(3):
+                with patch("pygame.draw.circle") as draw_circle:
+                    _draw_sun(
+                        surface, segment.distance + lap * track.length, track
+                    )
+                draw_circle.assert_called_once()
+                appearances.append(draw_circle.call_args.args[2:])
+            self.assertEqual(appearances[0], appearances[1])
+            self.assertEqual(appearances[0], appearances[2])
 
     def test_background_is_continuous_at_heading_and_lap_boundaries(self):
         """Parallax stays continuous across wrapped headings and lap ends."""
         for track in TRACKS:
             distances = [-0.01, track.length - 0.01]
-            distances.extend(
-                following.distance - 0.01
-                for segment, following in zip(
-                    track.segments, track.segments[1:]
-                )
-                if abs(following.heading - segment.heading) > math.pi
-            )
+            for index, segment in enumerate(track.segments):
+                following = track.segments[(index + 1) % len(track.segments)]
+                if abs(following.heading - segment.heading) <= math.pi:
+                    continue
+                lower = segment.distance
+                upper = segment.distance + segment.length
+                while upper - lower > 0.001:
+                    middle = (lower + upper) / 2
+                    heading = sample_track(middle, track).heading
+                    if abs(heading - segment.heading) > math.pi:
+                        upper = middle
+                    else:
+                        lower = middle
+                distances.append((lower + upper) / 2 - 0.01)
             for distance in distances:
                 before = _background_parallax_offsets(distance, track)
                 after = _background_parallax_offsets(distance + 0.02, track)

@@ -8,7 +8,6 @@ import pygame
 
 from .gamepad import LEFT_STICK_AXES, LEFT_TRIGGER_AXIS, RIGHT_TRIGGER_AXIS
 
-JOYSTICK_DEADZONE = 0.18
 MENU_STICK_DEADZONE = 0.35
 CAR_SELECTION_BUTTONS = (0, 1, 2, 3, 10)
 
@@ -65,9 +64,6 @@ def gamepad_controls(axes: Sequence[float]) -> DriveInput:
     trigger_axis = _axis_value(axes, RIGHT_TRIGGER_AXIS, default=-1.0)
     brake = max(0.0, min(1.0, (brake_axis + 1.0) / 2.0))
     accelerate = max(0.0, min(1.0, (trigger_axis + 1.0) / 2.0))
-    if abs(steering) <= JOYSTICK_DEADZONE:
-        steering = 0.0
-
     return DriveInput(accelerate=accelerate, brake=brake, steering=steering)
 
 

@@ -79,7 +79,8 @@ FEATURE: Gamepad driving input
 SCENARIO: Map gamepad stick, D-pad and trigger controls to driving
 GIVEN a gamepad exposes left-stick X, an optional D-pad and trigger axes
 WHEN the controls are sampled
-THEN left-stick X steers and values within the 0.18 deadzone produce no steering
+THEN left-stick X supplies steering, preserving small signed nonzero values
+AND the selected car's centered deadzone is applied to steering response
 AND D-pad horizontal steers digitally when available
 AND axis 4 maps linearly from -1..1 to braking 0..1
 AND axis 5 maps linearly from -1..1 to acceleration 0..1
@@ -122,7 +123,7 @@ THEN race options resume and the selected car, track, and lap count are retained
 ### FR-005 — Race simulation and car handling
 
 **Verification:** TST-005 through TST-009, TST-029, TST-030, TST-034,
-TST-036, TST-038, and AT-002.
+TST-036, TST-038, TST-051 through TST-053, and AT-002.
 
 ```gherkin
 FEATURE: Race simulation
@@ -136,6 +137,10 @@ AND lateral position remains within -1.12..1.12
 AND speed in km/h is converted to meters per second by dividing by 3.6
 AND forward progress accounts for heading error and the inside/outside bend
 AND steering changes vehicle heading relative to the selected track tangent
+AND each car type configures a centered steering-response interval
+AND Formula uses -0.12..0.12 and Classic uses -0.18..0.18, including boundaries
+AND inputs in that interval remain nonzero but act as neutral steering
+AND reversing steering passes through the interval without automatic recentering
 AND neutral steering on a straight creates no synthetic lateral drift
 AND steering can hold a representative tight bend at low speed
 ```
@@ -183,7 +188,7 @@ AND subsequent simulation steps leave the completed state unchanged
 ### FR-008 — Race and selection rendering
 
 **Verification:** TST-011 through TST-013, TST-021, TST-027, TST-031,
-TST-032, TST-041–TST-043, TST-046 through TST-049, and AT-001.
+TST-032, TST-041–TST-043, TST-046 through TST-050, TST-054, and AT-001.
 
 ```gherkin
 FEATURE: Game presentation
@@ -199,9 +204,13 @@ AND geometry behind the camera is clipped before perspective projection
 AND traffic uses the selected car shape
 AND player and traffic sprite widths use the selected car type's width
 AND mountains cover the sun where their shapes overlap
-AND background parallax scrolls opposite camera turns, with the sun moving
-  slower than the far mountain range and the near mountain range fastest
-AND background layers repeat seamlessly at screen edges and lap boundaries
+AND mountain parallax scrolls opposite camera turns, with the near range
+  moving faster than the far range
+AND mountain layers repeat seamlessly at screen edges and lap boundaries
+AND the sun stays due south in world coordinates, independent of parallax
+AND the sun uses camera perspective and is hidden when outside its view
+AND the sun reappears at the same heading on subsequent laps
+AND no sun marker is drawn on the overview map
 AND a completed race displays a game-over overlay
 ```
 
@@ -444,6 +453,11 @@ Gherkin feature/scenario.
 | TST-047 | `RenderingTests.test_background_scrolls_as_the_camera_turns` | FR-008 |
 | TST-048 | `RenderingTests.test_background_tiles_cover_edges_and_wrap_without_gaps` | FR-008 |
 | TST-049 | `RenderingTests.test_background_is_continuous_at_heading_and_lap_boundaries` | FR-008 |
+| TST-050 | `RenderingTests.test_sun_is_projected_due_south_independently_of_parallax` | FR-008 |
+| TST-051 | `GameStateTests.test_steering_deadzone_preserves_input_and_matches_neutral_response` | FR-005 |
+| TST-052 | `GameStateTests.test_steering_deadzone_is_configurable_per_car_type` | FR-005 |
+| TST-053 | `GameStateTests.test_steering_reversal_passes_through_neutral_interval` | FR-005 |
+| TST-054 | `RenderingTests.test_southern_sun_reappears_at_the_same_position_on_later_laps` | FR-008 |
 
 ### 6.2 Manual acceptance checks
 
@@ -468,10 +482,10 @@ Gherkin feature/scenario.
 | FR-002 | TST-002, TST-037 |
 | FR-003 | TST-014, AT-001 |
 | FR-004 | TST-003, TST-004, TST-024, TST-025, AT-001 |
-| FR-005 | TST-006–TST-009, TST-029, TST-030, TST-034, TST-036, TST-038, AT-002, AT-009 |
+| FR-005 | TST-006–TST-009, TST-029, TST-030, TST-034, TST-036, TST-038, TST-051–TST-053, AT-002, AT-009 |
 | FR-006 | AT-002 |
 | FR-007 | TST-010, TST-033, TST-040, AT-001, AT-009, AT-010 |
-| FR-008 | TST-011–TST-013, TST-021, TST-027, TST-031, TST-032, TST-041–TST-043, AT-001, AT-010 |
+| FR-008 | TST-011–TST-013, TST-021, TST-027, TST-031, TST-032, TST-041–TST-043, TST-046–TST-050, TST-054, AT-001, AT-010 |
 | FR-009 | TST-015, TST-016, AT-003 |
 | FR-010 | AT-004 |
 | FR-011 | TST-017–TST-021, TST-028, TST-031, AT-007 |

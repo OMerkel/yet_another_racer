@@ -60,6 +60,7 @@ __all__ = [
     "_draw_road",
     "_draw_start_lights",
     "_draw_start_line",
+    "_draw_sun",
     "_draw_track_map",
     "_draw_traffic",
     "_polygon",
@@ -90,6 +91,8 @@ CURB_RED = (222, 67, 57)
 CREAM = (244, 224, 177)
 INK = (20, 27, 39)
 GOLD = (255, 210, 92)
+SUN_ELEVATION = math.radians(7.0)
+SUN_RADIUS = 35
 
 
 @dataclass(frozen=True)
@@ -112,11 +115,36 @@ def create_fonts() -> Fonts:
 
 def _background_parallax_offsets(
     distance: float, track: Track = DEFAULT_TRACK
-) -> tuple[int, int, int]:
+) -> tuple[int, int]:
     heading = sample_track(distance, track).heading
     start_heading = track.segments[0].heading
     scroll = -(heading - start_heading) * SCREEN_WIDTH / math.tau
-    return round(scroll), round(scroll * 2), round(scroll * 3)
+    return round(scroll * 2), round(scroll * 3)
+
+
+def _draw_sun(
+    surface: pygame.Surface, distance: float, track: Track
+) -> None:
+    """Project a distant sun due south (-z), without mountain parallax."""
+    camera = _race_camera(distance, track)
+    direction = _camera_coordinates(
+        camera,
+        (camera.x, camera.elevation + math.tan(SUN_ELEVATION), camera.z - 1),
+    )
+    if direction[2] <= 0:
+        return
+    x, y = _project_camera_point(direction)
+    radius = SUN_RADIUS / direction[2]
+    if (
+        x + radius < 0
+        or x - radius >= SCREEN_WIDTH
+        or y + radius < 0
+        or y - radius > HORIZON
+    ):
+        return
+    pygame.draw.circle(
+        surface, (255, 206, 119), (round(x), round(y)), round(radius)
+    )
 
 
 def _draw_parallax_polygon(
@@ -136,9 +164,7 @@ def _draw_background(
     distance: float = 0.0,
     track: Track = DEFAULT_TRACK,
 ) -> None:
-    sun_offset, far_offset, near_offset = _background_parallax_offsets(
-        distance, track
-    )
+    far_offset, near_offset = _background_parallax_offsets(distance, track)
     for y in range(0, HORIZON + 1, 3):
         amount = y / HORIZON
         color = tuple(
@@ -147,11 +173,7 @@ def _draw_background(
         )
         pygame.draw.rect(surface, color, (0, y, SCREEN_WIDTH, 3))
 
-    sun_x = (790 + sun_offset) % SCREEN_WIDTH
-    for tile_offset in (-SCREEN_WIDTH, 0, SCREEN_WIDTH):
-        pygame.draw.circle(
-            surface, (255, 206, 119), (sun_x + tile_offset, 118), 35
-        )
+    _draw_sun(surface, distance, track)
     _draw_parallax_polygon(
         surface,
         (79, 98, 125),

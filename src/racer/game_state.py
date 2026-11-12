@@ -42,6 +42,7 @@ class CarType:
     braking: float
     width: float
     length: float
+    steering_deadzone: float
 
 
 CAR_TYPES = (
@@ -52,6 +53,7 @@ CAR_TYPES = (
         braking=1.0,
         width=1.8,
         length=5.5,
+        steering_deadzone=0.18,
     ),
     CarType(
         shape="simple",
@@ -60,6 +62,7 @@ CAR_TYPES = (
         braking=0.8,
         width=1.8,
         length=4.2,
+        steering_deadzone=0.27,
     ),
 )
 
@@ -180,6 +183,8 @@ def step_game(
 
     velocity = speed / 3.6
     steering = max(-1.0, min(1.0, controls.steering))
+    if abs(steering) <= car_type.steering_deadzone:
+        steering = 0.0
     steering_angle = steering * MAX_STEERING_ANGLE / (1 + velocity / 60)
     yaw_rate = velocity * math.tan(steering_angle) / WHEELBASE
     current_track = sample_track(state.distance, state.track)

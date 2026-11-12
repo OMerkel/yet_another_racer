@@ -219,6 +219,103 @@ class GameStateTests(unittest.TestCase):
             0.0,
         )
 
+    def test_steering_deadzone_preserves_input_and_matches_neutral_response(
+        self,
+    ):
+        """TST-051; FR-005.
+
+        FEATURE: Car-specific steering deadzone
+        SCENARIO: Preserve small inputs but apply neutral steering
+        GIVEN either car and a moving state with an existing heading
+        WHEN steering is inside or on its centered interval
+        THEN the input stays nonzero and motion matches neutral steering
+        """
+        for car_type in CAR_TYPES:
+            state = replace(
+                self.active_state(speed=120.0, lateral=0.4),
+                heading_error=0.03,
+            )
+            neutral = step_game(state, DriveInput(), 0.01, car_type)
+            for steering in (
+                -car_type.steering_deadzone,
+                -0.01,
+                0.0,
+                0.01,
+                car_type.steering_deadzone,
+            ):
+                with self.subTest(car_type=car_type.name, steering=steering):
+                    controls = DriveInput(steering=steering)
+                    self.assertEqual(
+                        step_game(state, controls, 0.01, car_type), neutral
+                    )
+                    self.assertEqual(controls.steering, steering)
+            for direction in (-1, 1):
+                controls = DriveInput(
+                    steering=direction * (car_type.steering_deadzone + 0.001)
+                )
+                turned = step_game(state, controls, 0.01, car_type)
+                self.assertGreater(
+                    direction * (turned.heading_error - neutral.heading_error),
+                    0.0,
+                )
+
+    def test_steering_deadzone_is_configurable_per_car_type(self):
+        """TST-052; FR-005.
+
+        FEATURE: Car-specific steering deadzone
+        SCENARIO: Give Formula a narrower interval than Classic
+        GIVEN an input between the two configured thresholds
+        WHEN each car processes the input
+        THEN only Formula turns and a zero threshold disables the deadzone
+        """
+        formula, classic = CAR_TYPES
+        self.assertLess(formula.steering_deadzone, classic.steering_deadzone)
+        state = self.active_state(speed=120.0)
+        steering = (formula.steering_deadzone + classic.steering_deadzone) / 2
+        for direction in (-1, 1):
+            controls = DriveInput(steering=direction * steering)
+            turned = step_game(state, controls, 0.01, formula)
+            straight = step_game(state, controls, 0.01, classic)
+            self.assertGreater(direction * turned.heading_error, 0.0)
+            self.assertEqual(straight.heading_error, 0.0)
+            self.assertEqual(straight.lateral, 0.0)
+        unfiltered = replace(formula, steering_deadzone=0.0)
+        self.assertGreater(
+            step_game(
+                state, DriveInput(steering=0.01), 0.01, unfiltered
+            ).heading_error,
+            0.0,
+        )
+
+    def test_steering_reversal_passes_through_neutral_interval(self):
+        """TST-053; FR-005.
+
+        FEATURE: Car-specific steering deadzone
+        SCENARIO: Reverse steering through the centered interval
+        GIVEN a moving car turning left or right
+        WHEN the input crosses small values before reversing
+        THEN small values hold its direction before opposite steering turns it
+        """
+        for car_type in CAR_TYPES:
+            for direction in (-1, 1):
+                state = self.active_state(speed=120.0, lateral=0.4)
+                state = step_game(
+                    state, DriveInput(steering=direction * 0.5), 0.01, car_type
+                )
+                for steering in (direction * 0.01, -direction * 0.01):
+                    neutral = step_game(state, DriveInput(), 0.01, car_type)
+                    state = step_game(
+                        state, DriveInput(steering=steering), 0.01, car_type
+                    )
+                    self.assertEqual(state, neutral)
+                opposite = step_game(
+                    state, DriveInput(steering=-direction * 0.5), 0.01, car_type
+                )
+                self.assertLess(
+                    direction * (opposite.heading_error - state.heading_error),
+                    0.0,
+                )
+
     def test_steering_strength_scales_with_speed(self):
         """TST-009; FR-005, NFR-002.
 

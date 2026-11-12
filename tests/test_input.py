@@ -41,16 +41,20 @@ class InputContractTests(unittest.TestCase):
 
         FEATURE: Gamepad driving input
         SCENARIO: Map stick and trigger axes into normalized controls
-        GIVEN gamepad axes at neutral, deadzone, and trigger positions
+        GIVEN gamepad axes at neutral, small steering, and trigger positions
         WHEN the axes are translated
-        THEN steering respects the deadzone and triggers map to 0..1
+        THEN small nonzero steering is preserved and triggers map to 0..1
         """
         self.assertEqual(gamepad_controls(()), DriveInput())
 
         self.assertEqual(
             gamepad_controls((0.1, -0.8, 0.0, 0.0, -1.0, -1.0)),
-            DriveInput(),
+            DriveInput(steering=0.1),
         )
+        for steering in (-0.18, -0.12, -0.01, 0.01, 0.12, 0.18):
+            self.assertEqual(
+                gamepad_controls((steering,)).steering, steering
+            )
         self.assertEqual(
             gamepad_controls((-0.7, 0.9, 0.0, 0.0, -1.0, -1.0)),
             DriveInput(steering=-0.7),

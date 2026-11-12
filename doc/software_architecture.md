@@ -59,9 +59,9 @@ flowchart LR
 
 ## Domain Types and Contracts
 
-- `CarType` holds a rendering `shape`, menu `name`, physical `width` and `length` in meters, and relative `acceleration` and `braking` multipliers. `CAR_TYPES` contains the Formula model (`1.0`, `1.0`) and Classic model (`0.7`, `0.8`). Dimensions determine collision bounds, width determines projected sprite size, and performance multipliers are used by `step_game()`.
+- `CarType` holds a rendering `shape`, menu `name`, physical `width` and `length` in meters, relative `acceleration` and `braking` multipliers, and a normalized `steering_deadzone` half-width. `CAR_TYPES` contains the Formula model (`1.0`, `1.0`) and Classic model (`0.7`, `0.8`). Dimensions determine collision bounds, width determines projected sprite size, and performance multipliers and the steering threshold are used by `step_game()`.
 - `DriveInput` is a frozen value object with `accelerate`, `brake`, and `steering` floats. The gameplay adapter produces throttle and brake in `[0, 1]`; steering is a normalized left/right value. `combine_controls()` takes the largest throttle and brake from active sources and sums steering before clamping it to `[-1, 1]`.
-- Gamepad axis constants in `gamepad.py` define left-stick axes `(0, 1)`, right-stick axes `(2, 3)`, left-trigger axis `4`, and right-trigger axis `5`. Gameplay uses left-stick horizontal axis 0 and D-pad horizontal input for steering, axis 4 for braking, and axis 5 for acceleration. Trigger values are mapped linearly from `[-1, 1]` to `[0, 1]`; an absent trigger axis defaults to `-1`, or zero input. Stick steering values within `JOYSTICK_DEADZONE` (`0.18`) of zero are set to zero.
+- Gamepad axis constants in `gamepad.py` define left-stick axes `(0, 1)`, right-stick axes `(2, 3)`, left-trigger axis `4`, and right-trigger axis `5`. Gameplay uses left-stick horizontal axis 0 and D-pad horizontal input for steering, axis 4 for braking, and axis 5 for acceleration. Trigger values are mapped linearly from `[-1, 1]` to `[0, 1]`; an absent trigger axis defaults to `-1`, or zero input. Small signed stick values are preserved in `DriveInput`; the selected car's steering deadzone is applied only by the simulation. Menu navigation retains its independent `MENU_STICK_DEADZONE` (`0.35`).
 - Keyboard arrows and WASD produce digital values (`0.0` or `1.0`) for throttle/brake and `-1.0`, `0.0`, or `1.0` for steering. Keyboard and gamepad values are combined by `InputHandler.read_controls()`.
 - Before a race, Up/Down, D-pad vertical, or left-stick Y changes the focused option; Left/Right, D-pad horizontal, or left-stick X changes its value.
 - `GameState` is a frozen snapshot containing race distance, speed, lateral position, lap count, start-light countdown, heading error, score, crash timer, game-over flag, traffic tuple, next traffic identifier, and selected `Track`. The race ends at `track.length * lap_count`. `TrafficCar` stores track distance, lane, and RGB color.
@@ -125,6 +125,17 @@ absolute distance separation below the car length and lateral separation
 footprint boundaries does not trigger a collision. The existing 0.9-second
 crash timer remains a penalty cooldown and a recent-contact indicator.
 
+`CarType.steering_deadzone` defines the inclusive centered steering interval:
+Formula uses `[-0.12, 0.12]`, while Classic uses `[-0.18, 0.18]`. After
+clamping combined input to `[-1, 1]`, `step_game()` uses zero effective
+steering when `abs(controls.steering) <= car_type.steering_deadzone`, without
+changing the supplied `DriveInput`. Outside the interval, the existing
+steering-angle calculation is unchanged. Crossing from left to right or back
+therefore passes through neutral steering. Neutral steering holds the current
+world heading rather than resetting heading error or lateral position;
+the car does not automatically recenter on the road. A threshold of zero
+disables the nonzero-input deadzone.
+
 `step_game()` is a pure transition: it returns a `dataclasses.replace()` copy and does not mutate the supplied `GameState`. It returns the original state unchanged once `game_over` is true. For active races, throttle and brake are clamped to `[0, 1]`; speed is updated using the selected car's factors and then clamped to `[0, MAX_SPEED]`:
 
 ```text
@@ -141,13 +152,21 @@ Traffic is initialized deterministically with ten cars at fixed track-distance i
 Road strips are fixed in world coordinates at 3-meter distance intervals with a 13-meter width. Their edges use the same centerline position and tangent as physics and the overview map. Centerline position is interpolated smoothly and heading is derived from its tangent, including across lap boundaries. A chase camera sits 8 meters behind the player and 4.5 meters above the road; world vertices are transformed into camera coordinates, clipped at a 1-meter near plane, and projected by dividing by forward depth. Visible road strips out to 450 meters are sorted back-to-front. Per-frame projected cross-sections are reused for asphalt, curbs, edge lines, and center dashes. Traffic and the player use the same camera and meter scale. The checkered start-line tiles are world-space road polygons at distance zero, so they share the road perspective and repeat at the lap boundary. The five red start lamps extinguish in sequence during the countdown. The map marker includes the player's lateral offset. The pre-race options screen shows a larger bird's-eye preview of the selected track. Background parallax remains decorative and does not influence road geometry or driving.
 
 Background parallax uses the sampled camera heading relative to the track's
-starting heading. The sun and far and near mountain ranges repeat one, two,
-and three times per full camera revolution, respectively, scrolling opposite
-the turn. Mountain silhouettes tile horizontally with matching endpoints;
-the sun wraps with copies at the screen edges. Integer repeat counts keep
-the images continuous when headings wrap at +/-pi and laps cross the start
-line. Offsets are derived from race distance rather than accumulated per
+starting heading, scrolling opposite the turn. The far and near mountain
+ranges repeat two and three times per full camera revolution, respectively.
+Their silhouettes tile horizontally with matching endpoints and integer
+repeat counts, preserving continuity across wrapped headings and lap joins.
+Mountain offsets are derived from race distance rather than accumulated per
 frame, so stationary scenery does not drift and rendering remains stateless.
+
+The sun is independent of parallax and fixed due south at infinity. The map
+places increasing world `z` upward, so south is the `-z` direction, or camera
+heading `pi`. `_draw_sun()` transforms that direction, with a fixed 7-degree
+elevation, into chase-camera coordinates and uses the same perspective
+projection as the road. The sun is centered when facing south and is culled
+behind the camera or outside the viewport. Mountains are drawn over it.
+Translation and completed laps do not change its bearing, so it reappears
+whenever the camera faces south again. No sun marker is drawn on the map.
 
 ## State and Input Lifecycle
 

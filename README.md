@@ -65,7 +65,10 @@ axis 5 for linear acceleration: -1 is zero, 0 is half, and +1 is full throttle.
 The left shoulder trigger uses axis 4 for linear braking: -1 is no brake, 0 is
 half, and +1 is hard braking.
 The Simple car has 70% of F1 acceleration and 80% of F1 braking strength.
-A small deadzone filters steering drift.
+Each car has a centered steering-response deadzone: Formula uses -0.12 to
++0.12 and Classic uses -0.18 to +0.18, including the boundaries. Small stick
+values remain available as nonzero input, but the car applies neutral steering
+within its interval. This holds its current direction, not the road center.
 Before a race, D-pad and left-stick directions follow the same navigation:
 vertical selects an option and horizontal changes its value. The default race
 is three laps.
@@ -75,8 +78,9 @@ selected car's physical width and length. `CONTACT!` indicates a recent hit
 and remains visible for 0.9 seconds, even after the cars separate. Passing
 traffic earns points.
 
-The sun and two mountain ranges scroll as the camera turns, with distant
-scenery moving more slowly than nearby scenery.
+Two mountain ranges scroll at different parallax speeds as the camera turns.
+The sun stays due south in the world and appears only when that direction is
+in view; it is not marked on the overview map.
 
 ## Gamepad Visualizer
 
@@ -89,10 +93,18 @@ screenshot shows a sample active input state.
 
 ## Structure
 
-- `src/racer.py` orchestrates startup, the event loop, and shutdown.
-- `src/racer/input.py` defines input contracts and adapts keyboard and gamepad input.
-- `src/racer/game_state.py` contains immutable state and pure race transitions.
-- `src/racer/track.py` defines the Hockenheim and Nurburgring GP centerlines.
-- `src/racer/rendering.py` draws frames from state without changing it.
+- [src/racer.py](src/racer.py) manages startup, the game loop, and shutdown.
+- [src/racer/input.py](src/racer/input.py) translates keyboard and gamepad input
+  into driving controls and menu actions.
+- [src/racer/game_state.py](src/racer/game_state.py) defines car types and
+  immutable race state, and simulates driving, collisions, and race progress.
+- [src/racer/track.py](src/racer/track.py) provides the Hockenheim and
+  Nurburgring GP circuit geometry shared by simulation, rendering, and maps.
+- [src/racer/rendering.py](src/racer/rendering.py) composes scenery, cars, and
+  the HUD without modifying race state.
+- [src/racer/rendering_geometry.py](src/racer/rendering_geometry.py) handles
+  camera projection, road geometry, and the checkered start line.
+- [src/racer/rendering_cars.py](src/racer/rendering_cars.py) draws the Formula
+  and Classic car silhouettes.
 - [Software Architecture](doc/software_architecture.md) describes the application modules and runtime flow.
 - [Software Requirements Specification](doc/requirements.md) records functional requirements and verification cases.
