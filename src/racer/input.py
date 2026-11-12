@@ -9,6 +9,7 @@ import pygame
 from .gamepad import LEFT_STICK_AXES, LEFT_TRIGGER_AXIS, RIGHT_TRIGGER_AXIS
 
 JOYSTICK_DEADZONE = 0.18
+MENU_STICK_DEADZONE = 0.35
 CAR_SELECTION_BUTTONS = (0, 1, 2, 3, 10)
 
 
@@ -27,8 +28,10 @@ class InputAction(Enum):
     NONE = auto()
     QUIT = auto()
     RESTART = auto()
-    PREVIOUS_CAR = auto()
-    NEXT_CAR = auto()
+    PREVIOUS_OPTION = auto()
+    NEXT_OPTION = auto()
+    PREVIOUS_VALUE = auto()
+    NEXT_VALUE = auto()
     START = auto()
 
 
@@ -96,27 +99,51 @@ def action_for_event(
             return InputAction.START
         if game_over:
             return InputAction.RESTART
+    if selecting_car and event.type == pygame.JOYHATMOTION:
+        horizontal, vertical = event.value
+        if vertical:
+            return (
+                InputAction.PREVIOUS_OPTION
+                if vertical > 0
+                else InputAction.NEXT_OPTION
+            )
+        if horizontal:
+            return (
+                InputAction.NEXT_VALUE
+                if horizontal > 0
+                else InputAction.PREVIOUS_VALUE
+            )
     if (
         selecting_car
         and event.type == pygame.JOYAXISMOTION
-        and event.axis == LEFT_STICK_AXES[0]
+        and event.axis in LEFT_STICK_AXES[:2]
     ):
-        if abs(event.value) <= JOYSTICK_DEADZONE:
+        if abs(event.value) <= MENU_STICK_DEADZONE:
             return InputAction.NONE
+        if event.axis == LEFT_STICK_AXES[0]:
+            return (
+                InputAction.NEXT_VALUE
+                if event.value > 0
+                else InputAction.PREVIOUS_VALUE
+            )
         return (
-            InputAction.NEXT_CAR
+            InputAction.NEXT_OPTION
             if event.value > 0
-            else InputAction.PREVIOUS_CAR
+            else InputAction.PREVIOUS_OPTION
         )
     if event.type != pygame.KEYDOWN:
         return InputAction.NONE
     if event.key == pygame.K_ESCAPE:
         return InputAction.QUIT
     if selecting_car:
-        if event.key in (pygame.K_LEFT, pygame.K_a):
-            return InputAction.PREVIOUS_CAR
-        if event.key in (pygame.K_RIGHT, pygame.K_d):
-            return InputAction.NEXT_CAR
+        if event.key == pygame.K_LEFT:
+            return InputAction.PREVIOUS_VALUE
+        if event.key == pygame.K_RIGHT:
+            return InputAction.NEXT_VALUE
+        if event.key == pygame.K_UP:
+            return InputAction.PREVIOUS_OPTION
+        if event.key == pygame.K_DOWN:
+            return InputAction.NEXT_OPTION
         if event.key in (pygame.K_RETURN, pygame.K_SPACE):
             return InputAction.START
         return InputAction.NONE
@@ -131,7 +158,7 @@ class InputHandler:
     def __init__(self):
         pygame.joystick.init()
         self._joystick = None
-        self._selection_stick_engaged = False
+        self._selection_stick_engaged: set[int] = set()
         self._connect_first_available()
 
     def process_event(
@@ -144,14 +171,14 @@ class InputHandler:
         action = action_for_event(event, game_over, selecting_car)
         if (
             event.type == pygame.JOYAXISMOTION
-            and event.axis == LEFT_STICK_AXES[0]
+            and event.axis in LEFT_STICK_AXES[:2]
         ):
-            if abs(event.value) <= JOYSTICK_DEADZONE:
-                self._selection_stick_engaged = False
-            elif selecting_car and self._selection_stick_engaged:
+            if abs(event.value) <= MENU_STICK_DEADZONE:
+                self._selection_stick_engaged.discard(event.axis)
+            elif selecting_car and event.axis in self._selection_stick_engaged:
                 action = InputAction.NONE
             else:
-                self._selection_stick_engaged = True
+                self._selection_stick_engaged.add(event.axis)
         if event.type == pygame.JOYDEVICEADDED and self._joystick is None:
             self._connect(event.device_index)
         elif (
@@ -173,7 +200,14 @@ class InputHandler:
             self._joystick.get_axis(index)
             for index in range(self._joystick.get_numaxes())
         )
-        return combine_controls(keyboard, gamepad_controls(axes))
+        gamepad = gamepad_controls(axes)
+        if self._joystick.get_numhats() > 0:
+            horizontal_hat, _ = self._joystick.get_hat(0)
+            if horizontal_hat:
+                gamepad = combine_controls(
+                    gamepad, DriveInput(steering=float(horizontal_hat))
+                )
+        return combine_controls(keyboard, gamepad)
 
     def close(self):
         """Release joystick resources owned by this handler."""
@@ -188,5 +222,4 @@ class InputHandler:
 
     def _connect(self, device_index: int):
         joystick = pygame.joystick.Joystick(device_index)
-        joystick.init()
         self._joystick = joystick

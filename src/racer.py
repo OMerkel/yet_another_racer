@@ -4,7 +4,13 @@ import sys
 
 import pygame
 
-from racer.game_state import CAR_TYPES, new_game, step_game
+from racer.game_state import (
+    CAR_TYPES,
+    DEFAULT_LAP_COUNT,
+    LAP_OPTIONS,
+    new_game,
+    step_game,
+)
 from racer.input import InputAction, InputHandler
 from racer.rendering import (
     FPS,
@@ -13,6 +19,7 @@ from racer.rendering import (
     draw_car_selection,
     draw_frame,
 )
+from racer.track import TRACKS
 
 
 def run_game() -> int:
@@ -23,8 +30,13 @@ def run_game() -> int:
     clock = pygame.time.Clock()
     fonts = create_fonts()
     input_handler = InputHandler()
-    state = new_game()
     selected_car = 0
+    selected_track = 0
+    selected_laps = LAP_OPTIONS.index(DEFAULT_LAP_COUNT)
+    selected_option = 0
+    state = new_game(
+        track=TRACKS[selected_track], lap_count=LAP_OPTIONS[selected_laps]
+    )
     selecting_car = True
     running = True
 
@@ -37,19 +49,49 @@ def run_game() -> int:
                 )
                 if action is InputAction.QUIT:
                     running = False
-                elif action is InputAction.PREVIOUS_CAR:
-                    selected_car = (selected_car - 1) % len(CAR_TYPES)
-                elif action is InputAction.NEXT_CAR:
-                    selected_car = (selected_car + 1) % len(CAR_TYPES)
+                elif action is InputAction.PREVIOUS_OPTION:
+                    selected_option = (selected_option - 1) % 3
+                elif action is InputAction.NEXT_OPTION:
+                    selected_option = (selected_option + 1) % 3
+                elif action in (
+                    InputAction.PREVIOUS_VALUE,
+                    InputAction.NEXT_VALUE,
+                ):
+                    direction = (
+                        -1 if action is InputAction.PREVIOUS_VALUE else 1
+                    )
+                    if selected_option == 0:
+                        selected_car = (selected_car + direction) % len(
+                            CAR_TYPES
+                        )
+                    elif selected_option == 1:
+                        selected_track = (selected_track + direction) % len(
+                            TRACKS
+                        )
+                    else:
+                        selected_laps = (selected_laps + direction) % len(
+                            LAP_OPTIONS
+                        )
                 elif action is InputAction.START:
-                    state = new_game()
+                    state = new_game(
+                        track=TRACKS[selected_track],
+                        lap_count=LAP_OPTIONS[selected_laps],
+                    )
                     selecting_car = False
                 elif action is InputAction.RESTART:
                     selecting_car = True
 
             if running:
                 if selecting_car:
-                    draw_car_selection(screen, fonts, CAR_TYPES[selected_car])
+                    draw_car_selection(
+                        screen,
+                        fonts,
+                        CAR_TYPES[selected_car],
+                        track=TRACKS[selected_track],
+                        track_index=selected_track,
+                        lap_count=LAP_OPTIONS[selected_laps],
+                        active_option=selected_option,
+                    )
                 else:
                     controls = input_handler.read_controls()
                     state = step_game(

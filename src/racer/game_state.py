@@ -4,12 +4,24 @@ import math
 from dataclasses import dataclass, replace
 
 from .input import DriveInput
+from .track import DEFAULT_TRACK, ROAD_HALF_WIDTH, Track, sample_track
 
-RACE_SECONDS = 90.0
-START_SPEED = 120.0
+START_SPEED = 0.0
 MAX_SPEED = 300.0
-MAX_WORLD_SPEED_FACTOR = 2.0
-MAX_STEERING_RATE = (1.15 + MAX_SPEED / 140) / 2
+WHEELBASE = 2.7
+MAX_STEERING_ANGLE = 0.8
+MAX_HEADING_ERROR = 0.10
+GRID_START_DISTANCE = 18.0
+START_LIGHTS_DURATION = 5.0
+START_LIGHT_COUNT = 5
+ACCELERATION_RATE = 42.0
+COAST_DECELERATION = 8.0
+BRAKE_DECELERATION = 100.0
+OFFROAD_THRESHOLD = 1.1
+OFFROAD_ACCELERATION_SCALE = 0.65
+OFFROAD_SPEED_DRAG = 0.18
+LAP_OPTIONS = (1, 3, 5)
+DEFAULT_LAP_COUNT = 3
 
 LANES = (-0.66, 0.0, 0.66)
 TRAFFIC_COLORS = (
@@ -52,12 +64,15 @@ class GameState:
     distance: float
     speed: float
     lateral: float
-    time_left: float
     score: int
     crash_time: float
     game_over: bool
     traffic: tuple[TrafficCar, ...]
     next_traffic_id: int
+    track: Track
+    lap_count: int
+    countdown: float
+    heading_error: float = 0.0
 
 
 def _traffic_car(distance: float, identifier: int) -> TrafficCar:
@@ -66,21 +81,27 @@ def _traffic_car(distance: float, identifier: int) -> TrafficCar:
     return TrafficCar(distance, lane, color)
 
 
-def new_game() -> GameState:
+def new_game(
+    track: Track = DEFAULT_TRACK, lap_count: int = DEFAULT_LAP_COUNT
+) -> GameState:
     """Return a deterministic fresh race state."""
+    if lap_count < 1:
+        raise ValueError("lap_count must be positive")
     traffic = tuple(
         _traffic_car(290 + index * 235, index) for index in range(10)
     )
     return GameState(
-        distance=0.0,
+        distance=-GRID_START_DISTANCE,
         speed=START_SPEED,
         lateral=0.0,
-        time_left=RACE_SECONDS,
         score=0,
         crash_time=0.0,
         game_over=False,
         traffic=traffic,
         next_traffic_id=len(traffic),
+        track=track,
+        lap_count=lap_count,
+        countdown=START_LIGHTS_DURATION,
     )
 
 
@@ -117,33 +138,64 @@ def step_game(
     """Return the next race state without mutating the input state."""
     if state.game_over:
         return state
+    if state.countdown > 0:
+        countdown = max(0.0, state.countdown - delta_time)
+        if countdown < 1e-9:
+            countdown = 0.0
+        return replace(
+            state,
+            countdown=countdown,
+        )
 
     speed = state.speed
     throttle = max(0.0, min(1.0, controls.accelerate))
     brake = max(0.0, min(1.0, controls.brake))
-    speed += (140 * throttle * car_type.acceleration - 14) * delta_time
-    speed -= 180 * brake * car_type.braking * delta_time
+    offroad = abs(state.lateral) > OFFROAD_THRESHOLD
+    acceleration = ACCELERATION_RATE * throttle * car_type.acceleration
+    if offroad:
+        acceleration *= OFFROAD_ACCELERATION_SCALE
+    speed += (acceleration - COAST_DECELERATION) * delta_time
+    speed -= BRAKE_DECELERATION * brake * car_type.braking * delta_time
     speed = max(0.0, min(MAX_SPEED, speed))
 
-    steering_gain = MAX_STEERING_RATE * (speed / MAX_SPEED)
-    lateral = state.lateral + controls.steering * steering_gain * delta_time
-    lateral -= (
-        math.sin(state.distance * 0.0016)
-        * (speed / MAX_SPEED)
-        * 0.11
+    velocity = speed / 3.6
+    steering = max(-1.0, min(1.0, controls.steering))
+    steering_angle = steering * MAX_STEERING_ANGLE / (1 + velocity / 60)
+    yaw_rate = velocity * math.tan(steering_angle) / WHEELBASE
+    current_track = sample_track(state.distance, state.track)
+    path_scale = max(
+        0.5,
+        1 - current_track.curvature * state.lateral * ROAD_HALF_WIDTH,
+    )
+    distance = state.distance + (
+        velocity * math.cos(state.heading_error) / path_scale * delta_time
+    )
+    finish_distance = state.track.length * state.lap_count
+    distance = min(distance, finish_distance)
+    next_track = sample_track(distance, state.track)
+    road_turn = math.atan2(
+        math.sin(next_track.heading - current_track.heading),
+        math.cos(next_track.heading - current_track.heading),
+    )
+    heading_error = max(
+        -MAX_HEADING_ERROR,
+        min(
+            MAX_HEADING_ERROR,
+            state.heading_error + yaw_rate * delta_time - road_turn,
+        ),
+    )
+    lateral = state.lateral + (
+        velocity
+        * math.sin((state.heading_error + heading_error) / 2)
         * delta_time
+        / ROAD_HALF_WIDTH
     )
     lateral = max(-1.12, min(1.12, lateral))
 
-    world_speed_factor = 1 + speed / MAX_SPEED * (MAX_WORLD_SPEED_FACTOR - 1)
-    distance = (
-        state.distance + speed * 0.44704 * world_speed_factor * delta_time
-    )
-    time_left = max(0.0, state.time_left - delta_time)
     crash_time = max(0.0, state.crash_time - delta_time)
 
-    if abs(lateral) > 0.94:
-        speed = max(50.0, speed - 125 * delta_time)
+    if offroad:
+        speed = max(0.0, speed - speed * OFFROAD_SPEED_DRAG * delta_time)
     if crash_time <= 0 and _has_collision(state.traffic, distance, lateral):
         speed *= 0.48
         crash_time = 0.9
@@ -156,10 +208,10 @@ def step_game(
         distance=distance,
         speed=speed,
         lateral=lateral,
-        time_left=time_left,
         score=state.score + passed_count * 250,
         crash_time=crash_time,
-        game_over=time_left <= 0,
+        game_over=distance >= finish_distance,
         traffic=traffic,
         next_traffic_id=next_traffic_id,
+        heading_error=heading_error,
     )

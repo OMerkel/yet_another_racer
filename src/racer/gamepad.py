@@ -6,6 +6,13 @@ from dataclasses import dataclass, field
 
 import pygame
 
+from src.racer.gamepad_sensors import (
+    ACCELEROMETER,
+    GYROSCOPE,
+    SDLControllerSensors,
+    SensorController,
+)
+
 LEFT_STICK_AXES = (0, 1)
 RIGHT_STICK_AXES = (2, 3)
 LEFT_TRIGGER_AXIS = 4
@@ -20,9 +27,16 @@ class GamepadState:
     axes: list[float]
     buttons: list[bool]
     hats: list[tuple[int, int]]
+    accelerometer: tuple[float, float, float] | None = None
+    gyroscope: tuple[float, float, float] | None = None
 
     @classmethod
-    def read(cls, joystick: pygame.joystick.JoystickType) -> GamepadState:
+    def read(
+        cls,
+        joystick: pygame.joystick.JoystickType,
+        accelerometer: tuple[float, float, float] | None = None,
+        gyroscope: tuple[float, float, float] | None = None,
+    ) -> GamepadState:
         """Poll after pumping events so held controls remain highlighted."""
 
         return cls(
@@ -42,6 +56,8 @@ class GamepadState:
                     for index in range(joystick.get_numhats())
                 )
             ],
+            accelerometer,
+            gyroscope,
         )
 
     def axis(self, index: int) -> float:
@@ -65,6 +81,12 @@ class Gamepads:
     resting_axes: dict[int, list[float]] = field(
         default_factory=dict[int, list[float]]
     )
+    sensor_controllers: dict[int, SensorController] = field(
+        default_factory=dict[int, SensorController]
+    )
+    sensor_reader: SDLControllerSensors = field(
+        default_factory=SDLControllerSensors, repr=False
+    )
 
     def open_connected(self) -> None:
         """Open devices already attached when the application starts."""
@@ -82,7 +104,21 @@ class Gamepads:
         self.devices[instance_id] = joystick
         pygame.event.pump()
         self.resting_axes[instance_id] = GamepadState.read(joystick).axes
+        sensor_controller = self.sensor_reader.open(device_index)
+        if sensor_controller is not None:
+            self.sensor_controllers[instance_id] = sensor_controller
         print(f"Connected: {joystick.get_name()} (ID {instance_id})")
+
+    def read_state(self, instance_id: int) -> GamepadState:
+        """Read raw controls and any available motion sensors."""
+
+        joystick = self.devices[instance_id]
+        controller = self.sensor_controllers.get(instance_id)
+        return GamepadState.read(
+            joystick,
+            self.sensor_reader.read(controller, ACCELEROMETER),
+            self.sensor_reader.read(controller, GYROSCOPE),
+        )
 
     def handle_event(self, event: pygame.event.Event) -> None:
         """Open newly attached controllers and close removed controllers."""
@@ -93,6 +129,11 @@ class Gamepads:
             joystick = self.devices.pop(event.instance_id, None)
             if joystick is not None:
                 print(f"Disconnected: ID {event.instance_id}")
+                sensor_controller = self.sensor_controllers.pop(
+                    event.instance_id, None
+                )
+                if sensor_controller is not None:
+                    self.sensor_reader.close(sensor_controller)
                 joystick.quit()
                 del self.resting_axes[event.instance_id]
 
@@ -110,6 +151,9 @@ class Gamepads:
     def close(self) -> None:
         """Release every open controller when either application exits."""
 
+        for sensor_controller in self.sensor_controllers.values():
+            self.sensor_reader.close(sensor_controller)
+        self.sensor_controllers.clear()
         for joystick in self.devices.values():
             joystick.quit()
         self.devices.clear()
